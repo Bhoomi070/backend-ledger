@@ -1,173 +1,174 @@
-💳 Backend Ledger System
+# 💳 Institutional Double-Entry Ledger Core
 
-A production-style backend ledger system built with Node.js, Express, MongoDB, and Mongoose that supports:
+> Production-grade financial transaction engine and double-entry ledger platform with distributed idempotency, snapshot balance derivation, and ACID session guarantees.
 
-User Authentication (JWT + Cookies)
-Account Management
-Double-entry Ledger System
-Idempotent Transactions
-MongoDB Transactions (Session-based)
-Email Notifications
-Protected Routes with Middleware
+[![Node.js](https://img.shields.io/badge/Node.js-20+-green?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js&logoColor=white)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-3.4-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Transactions-47A248?logo=mongodb&logoColor=white)](https://mongodb.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-🏗️ Tech Stack
+---
 
-Node.js
-Express.js
-MongoDB
-Mongoose
-JWT Authentication
-Nodemailer
-BcryptJS
-Render (Deployment)
+## 🎯 Executive Overview
 
-📂 Project Structure
+Conventional CRUD banking implementations mutate balances directly (`balance -= amount`), introducing dangerous race conditions, balance drift, and audit failures under concurrent load.
+
+This engine implements an **Institutional Double-Entry Accounting Core** modeled after systems at Stripe, Modern Treasury, and Brex.
+
+### Core Architectural Invariants:
+1. **Mathematical Equilibrium**: Every transfer generates equal, opposite, and atomic entries ($\sum \text{Debits} == \sum \text{Credits}$).
+2. **Derived Balances**: Account balances are never stored as static fields; they are derived dynamically via aggregation pipelines over immutable historical entries.
+3. **Strict Distributed Idempotency**: Network retries and duplicate submissions safely return cached transaction results without double-debiting.
+4. **ACID Snapshot Isolation**: MongoDB multi-document transactions ensure atomic commits and instant rollbacks on validation failures.
+5. **Zero BOLA Vulnerabilities**: Strict object-level authorization guarantees users can only transfer from accounts they own.
+
+---
+
+## 🏗️ System Architecture
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Next.js Client / API Client
+    participant Gateway as Express Gateway
+    participant Auth as Auth & BOLA Guard
+    participant Engine as ACID Transaction Manager
+    participant DB as MongoDB (Session)
+    participant Ledger as Immutable Ledger (DEBIT/CREDIT)
+
+    Client->>Gateway: POST /api/transactions (fromAccount, toAccount, amount, idempotencyKey)
+    Gateway->>Auth: Verify JWT + verify ownership of fromAccount (BOLA check)
+    Auth-->>Gateway: Authenticated & Authorized
+    Gateway->>DB: Check idempotencyKey cache
+    alt Idempotency Hit (COMPLETED)
+        DB-->>Client: Return cached 200 OK (Zero duplicate debits)
+    else New Transaction
+        Gateway->>Engine: Begin MongoDB Session & Transaction
+        Engine->>Ledger: Derive sender balance INSIDE session snapshot
+        alt Insufficient Funds
+            Engine-->>Client: Abort Session & Rollback (400 Bad Request)
+        else Balance Verified
+            Engine->>DB: Write Transaction (PENDING)
+            Engine->>Ledger: Append DEBIT entry (fromAccount)
+            Engine->>Ledger: Append CREDIT entry (toAccount)
+            Engine->>DB: Mark Transaction (COMPLETED)
+            Engine->>DB: Commit Transaction & End Session
+            Engine-->>Client: 201 Created (Transaction Confirmed)
+        end
+    end
+```
+
+---
+
+## 📂 Project Structure
+
+```
 backend-ledger/
-│
+├── server.js                 # Express server entry point (PORT configurable)
+├── package.json              # Backend dependencies (Express, Mongoose, JWT)
+├── .env.example              # Sample environment configuration
+├── run.bat / run.ps1         # 1-click backend launcher
+├── run-frontend.bat / .ps1   # 1-click frontend launcher
 ├── src/
+│   ├── app.js                # Express app setup, CORS, and route registration
+│   ├── config/
+│   │   └── db.js             # MongoDB connection manager
 │   ├── controllers/
-│   ├── models/
-│   ├── routes/
+│   │   ├── auth.controllers.js       # Register, Login, Logout, /me
+│   │   ├── account.controller.js     # Create, List, Balances, Statement, Faucet
+│   │   └── transaction.controller.js # 10-step ACID transfer, Reconciliation
 │   ├── middleware/
-│   ├── services/
-│   └── config/
-│
-├── server.js
-├── package.json
-└── .env
+│   │   └── auth.middleware.js        # JWT verification, blacklist, system check
+│   ├── Models/
+│   │   ├── account.model.js          # Account schema + getBalance() pipeline
+│   │   ├── ledger.model.js           # Immutable DEBIT/CREDIT entries + preventMod hook
+│   │   ├── transaction.model.js      # Idempotent transaction state machine
+│   │   ├── user.model.js             # User identity & bcrypt authentication
+│   │   └── blackList.model.js        # Revoked JWT token registry
+│   ├── routes/
+│   │   ├── auth.routes.js
+│   │   ├── account.routes.js
+│   │   └── transaction.routes.js
+│   └── services/
+│       └── email.service.js          # Transactional email notification service
+└── frontend/                         # Next.js 15 (TypeScript) Application
+    ├── package.json
+    ├── tsconfig.json
+    ├── next.config.js                # Automatic /api/* proxy to Express
+    ├── tailwind.config.js            # Minimalist FinTech theme (Mercury/Linear style)
+    └── src/
+        ├── app/
+        │   ├── layout.tsx            # Theme + Global Context Provider
+        │   ├── page.tsx              # Overview & Account Balances
+        │   ├── accounts/page.tsx     # Account Provisioning & Management
+        │   ├── transfers/page.tsx    # Move Money & Concurrency Guard Drawer
+        │   ├── ledger/page.tsx       # Immutable Ledger & CSV Export
+        │   └── reconciliation/page.tsx # Trial Balance & Invariant Verification
+        ├── components/
+        │   ├── Navbar.tsx            # Clean header with Dark/Light toggle
+        │   ├── AuthModal.tsx         # Sign in / Register modal
+        │   ├── FaucetModal.tsx       # Sandbox fund injection
+        │   └── Toast.tsx             # System notifications
+        ├── context/
+        │   ├── ThemeContext.tsx      # Persistent Dark/Light theme state
+        │   └── LedgerContext.tsx     # Global application state
+        ├── lib/
+        │   └── api.ts                # Type-safe API client & UUID generator
+        └── types/
+            └── ledger.ts             # Strict TypeScript data models
+```
 
-🔐 Authentication Flow
+---
 
-User registers
-Password hashed using bcrypt
-JWT token generated
-Token stored in cookie or Authorization header
-Protected routes use auth middleware
+## 🚀 Quickstart Guide
 
-🏦 Features
-1️⃣ User Module
-Register User
-Login User
-JWT-based Authentication
+### 1. Configure Environment
+Create a `.env` in the root directory:
+```env
+PORT=3000
+NODE_ENV=development
+MONGO_URI=mongodb+srv://<user>:<password>@cluster0.example.mongodb.net/ledger?retryWrites=true&w=majority
+JWT_SECRET=super_secret_production_key_ledger_2026
+```
 
-2️⃣ Account Module
-Create Account
-Account Status Management
-Account Balance derived from ledger (not stored)
-
-3️⃣ Ledger System (Immutable)
-CREDIT entries
-DEBIT entries
-Ledger entries cannot be updated or deleted
-Balance derived using aggregation
-
-4️⃣ Transaction System (10-Step Transfer Flow)
-Validate request
-Validate idempotency key
-Check account status
-Derive sender balance
-Create transaction (PENDING)
-Create DEBIT ledger entry
-Create CREDIT ledger entry
-Mark transaction COMPLETED
-Commit MongoDB session
-Send email notification
-
-🔄 Idempotency
-Transactions use an idempotencyKey to prevent duplicate transfers.
-If the same key is reused:
-COMPLETED → returns existing transaction
-PENDING → returns processing status
-FAILED → allows retry
-
-
-📡 API Endpoints
-🔐 Auth Routes
-Register
-POST /api/auth/register
-
-Body:
-{
-  "email": "test@gmail.com",
-  "name": "Test User",
-  "password": "123456"
-}
-
-Login
-POST /api/auth/login
-
-🏦 Account Routes
-Create Account
-POST /api/accounts
-
-
-(Protected Route)
-
-Header:
-
-Authorization: Bearer <token>
-
-💸 Transaction Routes
-Create Transfer
-POST /api/transactions
-
-
-Body:
-
-{
-  "fromAccount": "accountId",
-  "toAccount": "accountId",
-  "amount": 100,
-  "idempotencyKey": "unique-key-123"
-}
-
-Add Initial Funds (System User Only)
-POST /api/transactions/initial-funds
-
-⚙️ Environment Variables
-
-Create a .env file in the root directory:
-
-MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_secret_key
-CLIENT_ID=your_client_ID
-CLIENT_SECRET=your_client_Secret
-REFRESH_TOKEN=your_refresh_token
-EMAIL_USER=gmail.com
-
-
-⚠ On Render, add these in the Environment Variables section (Render does not use local .env).
-
-🧪 Run Locally
-git clone https://github.com/Bhoomi070/backend-ledger.git
-cd backend-ledger
+### 2. Start the Backend API (Port 3000)
+```bash
 npm install
 npm run dev
+```
+*(Or double-click `run.bat` / run `.\run.ps1`)*
 
+### 3. Start the Next.js Frontend (Port 3001)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+*(Or double-click `run-frontend.bat` / run `.\run-frontend.ps1`)*
 
-Server runs on:
-http://localhost:3000
+Open **`http://localhost:3001`** in your browser.
 
-🚀 Deployment
+---
 
-Deployed using Render Web Service
-Start command:
-node server.js
+## 📡 Core API Reference
 
-🔒 Security Features
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/auth/register` | Register a new user |
+| `POST` | `/api/auth/login` | Authenticate user & issue JWT |
+| `POST` | `/api/auth/logout` | Invalidate token and clear cookie |
+| `GET` | `/api/auth/me` | Fetch authenticated session profile |
+| `POST` | `/api/accounts/` | Provision new ledger account |
+| `GET` | `/api/accounts/` | List user accounts with derived balances |
+| `GET` | `/api/accounts/:id/statement` | Fetch chronological ledger audit trail |
+| `POST` | `/api/accounts/faucet` | Deposit sandbox test funds via Central Settlement |
+| `POST` | `/api/transactions/` | Execute double-entry transfer with ACID session |
+| `GET` | `/api/transactions/reconciliation` | Verify system invariant ($\sum C - \sum D = 0$) |
+| `GET` | `/api/transactions/recent` | List latest committed platform transactions |
 
-Password hashing (bcrypt)
-JWT authentication
-Cookie-based auth support
-Immutable ledger entries
-MongoDB session-based atomic transactions
-Role-based system user middleware
+---
 
-🧠 Key Learning Concepts
-
-Double-entry bookkeeping system
-Derived balance from ledger (not stored directly)
-Idempotent API design
-MongoDB Transactions
-Middleware-based Authorization
-Production debugging & deployment
+## 📄 License
+MIT License.
