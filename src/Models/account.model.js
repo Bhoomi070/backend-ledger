@@ -1,7 +1,7 @@
-const mongoose = require('mongoose')
-const ledgerModel = require("./ledger.model")
+const mongoose = require('mongoose');
+const ledgerModel = require("./ledger.model");
 
-const accountSchema = new mongoose.Schema ({
+const accountSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "user",
@@ -14,23 +14,21 @@ const accountSchema = new mongoose.Schema ({
             values: ["ACTIVE", "FROZEN", "CLOSED"],
             message: "Status can be either ACTIVE, FROZEN, CLOSED",
         },
-        default:"ACTIVE"
+        default: "ACTIVE"
     },
-    currency:{
-        type : String,
-        required : [ true, "Currency is required for creating an account" ],
-        default : "INR"
+    currency: {
+        type: String,
+        required: [true, "Currency is required for creating an account"],
+        default: "INR"
     }
 }, {
-     
     timestamps: true
-})
+});
 
-accountSchema.index({ user: 1, status: 1 })
+accountSchema.index({ user: 1, status: 1 });
 
-accountSchema.methods.getBalance = async function() {
-
-    const balanceData = await ledgerModel.aggregate([
+accountSchema.methods.getBalance = async function(session = null) {
+    const pipeline = [
         { $match: { account: this._id } },
         {
             $group: {
@@ -38,8 +36,8 @@ accountSchema.methods.getBalance = async function() {
                 totalDebit: {
                     $sum: {
                         $cond: [
-                            { $eq: [ "$type", "DEBIT" ] },
-                            "$amount" ,
+                            { $eq: ["$type", "DEBIT"] },
+                            "$amount",
                             0
                         ]
                     }
@@ -47,7 +45,7 @@ accountSchema.methods.getBalance = async function() {
                 totalCredit: {
                     $sum: {
                         $cond: [
-                            { $eq: ["$type", "CREDIT" ] },
+                            { $eq: ["$type", "CREDIT"] },
                             "$amount",
                             0
                         ]
@@ -58,20 +56,25 @@ accountSchema.methods.getBalance = async function() {
         {
             $project: {
                 _id: 0,
-                balance: { $subtract: [ "$totalCredit", "$totalDebit"]}
+                balance: { $subtract: ["$totalCredit", "$totalDebit"] }
             }
         }
-    ])
+    ];
 
-    if(balanceData.length === 0) {
-        return 0
+    const aggregateQuery = ledgerModel.aggregate(pipeline);
+    if (session) {
+        aggregateQuery.session(session);
     }
 
-    return balanceData[ 0 ].balance 
-}
+    const balanceData = await aggregateQuery;
 
+    if (balanceData.length === 0) {
+        return 0;
+    }
 
-const accountModel = mongoose.model("account", accountSchema)
+    return balanceData[0].balance;
+};
 
-module.exports = accountModel
+const accountModel = mongoose.model("account", accountSchema);
 
+module.exports = accountModel;
